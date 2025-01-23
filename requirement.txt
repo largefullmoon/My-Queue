@@ -1,0 +1,8 @@
+flask
+pymongo
+werkzeug
+PyJWT
+dnspython
+python-dotenv
+requests
+gunicorn
