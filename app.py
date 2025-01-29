@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request, abort, send_from_directory
 from pymongo import MongoClient
 from bson import SON
 from werkzeug.utils import secure_filename
@@ -375,7 +375,13 @@ def delete_appointment(appointment_id):
         return jsonify({"error": "Appointment not found"}), 404
     
     return jsonify({"message": "Appointment deleted successfully"}), 200
-@app.route("/")
+@app.route("/image/<path:filename>", methods=['GET'])
+def get_image(filename):
+    uploads_dir = app.config['UPLOAD_FOLDER']
+    try:
+        return send_from_directory(uploads_dir, filename)
+    except FileNotFoundError:
+        abort(404)
 def home():
     return jsonify({"message": "Welcome to the Booking System API!"})
 
