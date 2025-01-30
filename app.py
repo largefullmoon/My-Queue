@@ -207,8 +207,13 @@ def add_appointment():
 # Get Appointments List API
 @app.route("/appointments", methods=["GET"])
 def get_appointments():
+    customer_id = request.args.get('customer_id')
+    type = request.args.get('type')
     # Fetch appointments from the MongoDB collection
-    appointments = list(appointments_collection.find())
+    if type == "history":
+        appointments = list(appointments_collection.find({'status' : 'completed'}))
+    else:
+        appointments = list(appointments_collection.find({'status' : 'scheduled'}))
 
     # Convert non-serializable fields
     for appointment in appointments:
@@ -414,6 +419,40 @@ def upload_images():
         return jsonify({'message': 'An error occurred'}), 500
     
 
-# Run the app
+# Update User Information API
+@app.route("/users/<user_id>", methods=["PUT"])
+def update_user_data(user_id):
+    try:
+        user_object_id = ObjectId(user_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid user ID"}), 400
+    
+    # Get the updated data from the request
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update user information
+    result = users_collection.update_one({"_id": user_object_id}, {"$set": data})
+    
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify({"message": "User information updated successfully"}), 200
+
+@app.route("/users/<user_id>", methods=["GET"])
+def get_user_data(user_id):
+    try:
+        user_object_id = ObjectId(user_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid user ID"}), 400
+    
+    user = users_collection.find_one({"_id": user_object_id})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    user['_id'] = str(user['_id'])  # Convert ObjectId to string
+    return jsonify(user), 200
+
 if __name__ == "__main__":
     app.run(debug=True, port=5005, host="0.0.0.0")
