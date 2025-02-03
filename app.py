@@ -80,6 +80,7 @@ def signup():
 @app.route("/signin", methods=["POST"])
 def signin():
     data = request.json
+    is_social_login = data.get('is_social_login')
     # Validate input
     if not data or not data.get('email') or not data.get('password'):
         return jsonify({"error": "Email and password are required"}), 400
@@ -89,8 +90,9 @@ def signin():
     if not user:
         return jsonify({"error": "User not found"}), 404
     
+    # if social login don't validate password
     # Check password
-    if not check_password_hash(user['password'], data['password']):
+    if not is_social_login  and not check_password_hash(user['password'], data['password']):
         return jsonify({"error": "Invalid credentials"}), 401
     
     # Generate token
