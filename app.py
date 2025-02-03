@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request, abort, send_from_directory
 from pymongo import MongoClient
 from bson import SON
 from werkzeug.utils import secure_filename
@@ -6,7 +6,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import datetime
 import os
-
+from bson.objectid import ObjectId
 # Load configuration
 app = Flask(__name__)
 app.config.from_object("config.Config")
@@ -71,17 +71,16 @@ def signup():
         "phone": data.get('phone'),
         "created_at": datetime.datetime.utcnow()
     }
-    
+
     user_id = users_collection.insert_one(user_data).inserted_id
     
-    return jsonify({"message": "User created successfully", "user_id": str(user_id)}), 201
+    return jsonify({"message": "User created successfully", "user_id": str(user_id)}), 200
 
 # Signin API
 @app.route("/signin", methods=["POST"])
 def signin():
     data = request.json
     is_social_login = data.get('is_social_login')
-    
     # Validate input
     if not data or not data.get('email') or not data.get('password'):
         return jsonify({"error": "Email and password are required"}), 400
@@ -110,17 +109,15 @@ def signin():
 
 # Customer List API
 @app.route("/customers", methods=["GET"])
-@token_required
 def get_customers():
     customer_id = request.args.get('customer_id')
-    customers = list(customers_collection.find({customer_id : customer_id}))
+    customers = list(customers_collection.find({'customer_id':customer_id}))
     for customer in customers:
         customer['_id'] = str(customer['_id'])
     return jsonify(customers), 200
 
 # Add Customer API
 @app.route("/customers", methods=["POST"])
-@token_required
 def add_customer():
     data = request.json
     
@@ -149,13 +146,13 @@ def add_customer():
 
 # Edit Customer API
 @app.route("/customers/<customer_id>", methods=["PUT"])
-@token_required
 def edit_customer(customer_id):
     data = request.json
     
     try:
         customer_object_id = ObjectId(customer_id)
-    except:
+    except Exception as e:
+        print(e)
         return jsonify({"error": "Invalid customer ID"}), 400
     
     # Find customer
@@ -175,7 +172,6 @@ def edit_customer(customer_id):
 
 # Add Appointment API
 @app.route("/appointments", methods=["POST"])
-@token_required
 def add_appointment():
     data = request.json
     
@@ -190,8 +186,8 @@ def add_appointment():
     
     # Check if customer exists
     customer = customers_collection.find_one({"_id": customer_object_id})
-    if not customer:
-        return jsonify({"error": "Customer not found"}), 404
+    # if not customer:
+    #     return jsonify({"error": "Customer not found"}), 404
     
     appointment_data = {
         "customer_id": customer_object_id,
@@ -212,20 +208,24 @@ def add_appointment():
 
 # Get Appointments List API
 @app.route("/appointments", methods=["GET"])
-@token_required
 def get_appointments():
     customer_id = request.args.get('customer_id')
-    appointments = list(appointments_collection.find({customer_id: customer_id}))
-    
-    # Convert ObjectId to string and include customer details
+    type = request.args.get('type')
+    # Fetch appointments from the MongoDB collection
+    if type == "history":
+        appointments = list(appointments_collection.find({'status' : 'completed'}))
+    else:
+        appointments = list(appointments_collection.find({'status' : 'scheduled'}))
+
+    # Convert non-serializable fields
     for appointment in appointments:
-        appointment['_id'] = str(appointment['_id'])
+        appointment['_id'] = str(appointment['_id'])  # Convert ObjectId to string
+        appointment['customer_id'] = str(appointment['customer_id'])  # Convert ObjectId to string
 
     return jsonify(appointments), 200
 
 # Create Business API
 @app.route("/businesses", methods=["POST"])
-@token_required
 def create_business():
     data = request.json
     # Validate input
@@ -246,19 +246,18 @@ def create_business():
         "phone": data.get('phone', ''),
         "created_at": datetime.datetime.utcnow()
     }
-    
     business_id = businesses_collection.insert_one(business_data).inserted_id
     
+
     return jsonify({
         "message": "Business created successfully", 
         "business_id": str(business_id)
-    }), 201
+    }), 200
 # Get Businesses List API
 @app.route("/businesses", methods=["GET"])
-@token_required
 def get_businesses():
     customer_id = request.args.get('customer_id')
-    businesses = list(businesses_collection.find({customer_id : customer_id}))
+    businesses = list(businesses_collection.find({'customer_id' : customer_id}))
     
     # Convert ObjectId to string and include customer details
     for businesse in businesses:
@@ -266,34 +265,196 @@ def get_businesses():
 
     return jsonify(businesses), 200
 
-# Home route
-@app.route("/")
+# Delete Client API
+@app.route("/clients/<client_id>", methods=["DELETE"])
+def delete_client(client_id):
+    try:
+        client_object_id = ObjectId(client_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid client ID"}), 400
+    
+    result = customers_collection.delete_one({"_id": client_object_id})
+    
+    if result.deleted_count == 0:
+        return jsonify({"error": "Client not found"}), 404
+    
+    return jsonify({"message": "Client deleted successfully"}), 200
+
+# Delete Business API
+@app.route("/businesses/<business_id>", methods=["DELETE"])
+def delete_business(business_id):
+    try:
+        business_object_id = ObjectId(business_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid business ID"}), 400
+    
+    result = businesses_collection.delete_one({"_id": business_object_id})
+    
+    if result.deleted_count == 0:
+        return jsonify({"error": "Business not found"}), 404
+    
+    return jsonify({"message": "Business deleted successfully"}), 200
+
+# Update Appointment API
+@app.route("/appointments/<appointment_id>", methods=["PUT"])
+def update_appointment(appointment_id):
+    data = request.json
+    
+    try:
+        appointment_object_id = ObjectId(appointment_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid appointment ID"}), 400
+    
+    # Find appointment
+    appointment = appointments_collection.find_one({"_id": appointment_object_id})
+    if not appointment:
+        return jsonify({"error": "Appointment not found"}), 404
+    
+    # Update appointment
+    update_data = {k: v for k, v in data.items() if k in ['date', 'time', 'category', 'location', 'status']}
+    
+    appointments_collection.update_one(
+        {"_id": appointment_object_id},
+        {"$set": update_data}
+    )
+    
+    return jsonify({"message": "Appointment updated successfully"}), 200
+
+# Update Business API
+@app.route("/businesses/<business_id>", methods=["PUT"])
+def update_business(business_id):
+    data = request.json
+    
+    try:
+        business_object_id = ObjectId(business_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid business ID"}), 400
+    
+    # Find business
+    business = businesses_collection.find_one({"_id": business_object_id})
+    if not business:
+        return jsonify({"error": "Business not found"}), 404
+    
+    # Update business
+    update_data = {k: v for k, v in data.items() if k in ['name', 'image', 'category', 'address', 'phone']}
+    
+    businesses_collection.update_one(
+        {"_id": business_object_id},
+        {"$set": update_data}
+    )
+    
+    return jsonify({"message": "Business updated successfully"}), 200
+
+@app.route("/completeappointment/<appointment_id>", methods=["PUT"])
+def complete_appointment(appointment_id):
+    data = request.json
+    
+    try:
+        appointment_object_id = ObjectId(appointment_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid business ID"}), 400
+    
+    # Find business
+    appointment = appointments_collection.find_one({"_id": appointment_object_id})
+    if not appointment:
+        return jsonify({"error": "Business not found"}), 404
+    
+    # Update business
+    update_data = {"status": "completed"}
+    
+    appointments_collection.update_one(
+        {"_id": appointment_object_id},
+        {"$set": update_data}
+    )
+    
+    return jsonify({"message": "Business updated successfully"}), 200
+
+@app.route("/appointments/<appointment_id>", methods=["DELETE"])
+def delete_appointment(appointment_id):
+    try:
+        appointment_object_id = ObjectId(appointment_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid appointment ID"}), 400
+    
+    result = appointments_collection.delete_one({"_id": appointment_object_id})
+    
+    if result.deleted_count == 0:
+        return jsonify({"error": "Appointment not found"}), 404
+    
+    return jsonify({"message": "Appointment deleted successfully"}), 200
+@app.route("/image/<path:filename>", methods=['GET'])
+def get_image(filename):
+    uploads_dir = app.config['UPLOAD_FOLDER']
+    try:
+        return send_from_directory(uploads_dir, filename)
+    except FileNotFoundError:
+        abort(404)
 def home():
     return jsonify({"message": "Welcome to the Booking System API!"})
 
 @app.route('/upload/images', methods=['POST'])
 def upload_images():
-    if 'files' not in request.files:
-        return jsonify({'message': 'No file part'}), 400
-    
-    files = request.files.getlist('files')
-    
-    if not files or files[0].filename == '':
-        return jsonify({'message': 'No selected file'}), 400
-    
-    uploaded_files = []
-    for file in files:
-        if file:
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            uploaded_files.append(filename)
-    
-    return jsonify({
-        'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
-        'file': filename
-    }), 200
+    try:
+        if 'files' not in request.files:
+            print("No file part")
+            return jsonify({'message': 'No file part'}), 400
+        
+        files = request.files.getlist('files')
+        print(files)
+        if not files or files[0].filename == '':
+            print("No selected file")
+            return jsonify({'message': 'No selected file'}), 400
 
-# Run the app
+        uploaded_files = []
+        for file in files:
+            if file:
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                uploaded_files.append(filename)
+        return jsonify({
+            'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
+            'file': filename
+        }), 200
+    except Exception as e:
+        print(e)
+        return jsonify({'message': 'An error occurred'}), 500
+    
+
+# Update User Information API
+@app.route("/users/<user_id>", methods=["PUT"])
+def update_user_data(user_id):
+    try:
+        user_object_id = ObjectId(user_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid user ID"}), 400
+    
+    # Get the updated data from the request
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update user information
+    result = users_collection.update_one({"_id": user_object_id}, {"$set": data})
+    
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify({"message": "User information updated successfully"}), 200
+
+@app.route("/users/<user_id>", methods=["GET"])
+def get_user_data(user_id):
+    try:
+        user_object_id = ObjectId(user_id)
+    except Exception as e:
+        return jsonify({"error": "Invalid user ID"}), 400
+    
+    user = users_collection.find_one({"_id": user_object_id})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    user['_id'] = str(user['_id'])  # Convert ObjectId to string
+    return jsonify(user), 200
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, host="0.0.0.0")
+    app.run(debug=True, port=5005, host="0.0.0.0")
