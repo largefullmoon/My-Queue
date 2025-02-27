@@ -460,5 +460,45 @@ def get_user_data(user_id):
     user['_id'] = str(user['_id'])  # Convert ObjectId to string
     return jsonify(user), 200
 
+@app.route("/verify-email", methods=["POST"])
+def verify_email():
+    data = request.json
+    
+    # Validate input
+    if not data or not data.get('email'):
+        return jsonify({"error": "Email is required"}), 400
+    
+    # Check if user exists
+    user = users_collection.find_one({"email": data['email']})
+    if not user:
+        return jsonify({"error": "No account found with this email"}), 404
+    
+    
+    return jsonify({"message": "Email verified successfully"}), 200
+
+@app.route("/reset-password", methods=["POST"])
+def reset_password():
+    data = request.json
+    
+    # Validate input
+    if not data or not data.get('email') or not data.get('new_password'):
+        return jsonify({"error": "Email and new password are required"}), 400
+    
+    # Find user
+    user = users_collection.find_one({"email": data['email']})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    # Hash new password
+    hashed_password = generate_password_hash(data['new_password'])
+    
+    # Update password
+    users_collection.update_one(
+        {"email": data['email']},
+        {"$set": {"password": hashed_password}}
+    )
+    
+    return jsonify({"message": "Password reset successfully"}), 200
+
 if __name__ == "__main__":
     app.run(debug=True, port=8080, host="0.0.0.0")
